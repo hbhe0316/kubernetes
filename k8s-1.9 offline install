@@ -1,0 +1,236 @@
+
+k8s介质下载
+链接：https://pan.baidu.com/s/1diVu8m 密码：dxog
+
+操作系统准备
+[root@master manifests]# cat /etc/redhat-release 
+CentOS Linux release 7.4.1708 (Core)
+
+hostname准备
+[root@master ~]# cat /etc/hosts
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+192.168.137.100 master
+192.168.137.101 slave1
+192.168.137.102 slave2
+
+关闭防火墙
+#service firewalld stop
+#chkconfig firewalld off
+
+关闭selinux
+#setenforce 0
+#sed -i 's/enforcing/disabled/g' /etc/selinux/config
+
+修改 /etc/sysctl.conf，添加以下内容
+net.ipv4.ip_forward=1
+net.bridge.bridge-nf-call-iptables=1
+net.bridge.bridge-nf-call-ip6tables=1
+
+如果遇到下列情况，请参考如下
+[root@k8s-master net]# sysctl -p
+net.ipv4.ip_forward = 1
+sysctl: cannot stat /proc/sys/net/bridge/bridge-nf-call-iptables: No such file or directory
+sysctl: cannot stat /proc/sys/net/bridge/bridge-nf-call-ip6tables: No such file or directory
+
+[root@k8s-master net]# modprobe br_netfilter
+[root@k8s-master net]# ls /proc/sys/net/bridge/
+bridge-nf-call-arptables  bridge-nf-call-iptables        bridge-nf-filter-vlan-tagged
+bridge-nf-call-ip6tables  bridge-nf-filter-pppoe-tagged  bridge-nf-pass-vlan-input-dev
+[root@k8s-master net]# sysctl -p
+net.ipv4.ip_forward = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+
+更新系统
+#yum upgrade -y
+
+安装docker 
+#yum install docker -y
+#service docker restart
+#systermctl enable docker
+
+安装kubelet kubeadm kubectl包
+#rpm -ivh socat-1.7.3.2-2.el7.x86_64.rpm
+#rpm -ivh kubernetes-cni-0.6.0-0.x86_64.rpm  kubelet-1.9.9-9.x86_64.rpm  kubectl-1.9.0-0.x86_64.rpm
+#rpm -ivh kubectl-1.9.0-0.x86_64.rpm
+#rpm -ivh kubeadm-1.9.0-0.x86_64.rpm
+
+
+查看kubectl版本
+[root@master home]# kubectl version
+Client Version: version.Info{Major:"1", Minor:"9", GitVersion:"v1.9.0", GitCommit:"5fa2db2bd46ac79e5e00a4e6ed24191080aa463b", GitTreeState:"clean", BuildDate:"2018-01-18T10:09:24Z", GoVersion:"go1.9.2", Compiler:"gc", Platform:"linux/amd64"}
+The connection to the server localhost:8080 was refused - did you specify the right host or port?
+
+master节点操作
+[root@master home]# systemctl enable kubelet && sudo systemctl start kubelet
+
+设置 Kubelete Swap 选项
+Kubernetes 1.8开始要求关闭系统的Swap，如果不关闭，默认配置下kubelet将无法启动。可以通过kubelet的启动参数--fail-swap-on=false更改这个限制。
+全局关闭：
+关闭系统的Swap方法如下:
+[root@master home]#swapoff -a
+
+修改 /etc/fstab 文件，注释掉 SWAP 的自动挂载，使用free -m确认swap已经关闭。
+
+ swappiness参数调整，修改/etc/sysctl.d/k8s.conf添加下面一行：vm.swappiness=0
+
+修改完成后，执行命令[root@master home]sysctl -p
+
+导入镜像
+docker load <etcd-amd64_v3.1.10.tar
+docker load <flannel_v0.9.1-amd64.tar
+docker load <k8s-dns-dnsmasq-nanny-amd64_v1.14.7.tar
+docker load <k8s-dns-kube-dns-amd64_1.14.7.tar
+docker load <k8s-dns-sidecar-amd64_1.14.7.tar
+docker load <kube-apiserver-amd64_v1.9.0.tar
+docker load <kube-controller-manager-amd64_v1.9.0.tar
+docker load <kube-scheduler-amd64_v1.9.0.tar
+docker load <kube-proxy-amd64_v1.9.0.tar
+docker load <pause-amd64_3.0.tar
+docker load < kubernetes-dashboard_v1.8.1.tar
+
+
+
+
+master节点与node节点做互信
+[root@master ~]# ssh-keygen
+[root@master ~]# ssh-copy-id slave1
+[root@master ~]# ssh-copy-id slave2
+
+
+5. 初始化集群
+Kubernetes 1.8开始要求关闭系统的Swap，如果不关闭，默认配置下kubelet将无法启动，本安装过程中我们会采用先忽略后面再设置的方法，所以采用参数 --ignore-preflight-errors=Swap 忽略这个错误。对于 POD Network 我们采用 Flannel，Flannel 默认设置的网段为 10.244.0.0./16，因此我们在 init 命令中使用 --pod-network-cidr=10.244.0.0/16 来指定。当然 kubeadm init 命令行中的参数也可以使用配置文件来配置
+
+
+[root@master k8s_images]# kubeadm init --kubernetes-version=v1.9.0 --pod-network-cidr=10.244.0.0/16
+[init] Using Kubernetes version: v1.9.0
+[init] Using Authorization modes: [Node RBAC]
+[preflight] Running pre-flight checks.
+	[WARNING Service-Kubelet]: kubelet service is not enabled, please run 'systemctl enable kubelet.service'
+	[WARNING FileExisting-crictl]: crictl not found in system path
+[preflight] Starting the kubelet service
+[certificates] Generated ca certificate and key.
+[certificates] Generated apiserver certificate and key.
+[certificates] apiserver serving cert is signed for DNS names [master kubernetes kubernetes.default kubernetes.default.svc kubernetes.default.svc.cluster.local] and IPs [10.96.0.1 192.168.137.100]
+[certificates] Generated apiserver-kubelet-client certificate and key.
+[certificates] Generated sa key and public key.
+[certificates] Generated front-proxy-ca certificate and key.
+[certificates] Generated front-proxy-client certificate and key.
+[certificates] Valid certificates and keys now exist in "/etc/kubernetes/pki"
+[kubeconfig] Wrote KubeConfig file to disk: "admin.conf"
+[kubeconfig] Wrote KubeConfig file to disk: "kubelet.conf"
+[kubeconfig] Wrote KubeConfig file to disk: "controller-manager.conf"
+[kubeconfig] Wrote KubeConfig file to disk: "scheduler.conf"
+[controlplane] Wrote Static Pod manifest for component kube-apiserver to "/etc/kubernetes/manifests/kube-apiserver.yaml"
+[controlplane] Wrote Static Pod manifest for component kube-controller-manager to "/etc/kubernetes/manifests/kube-controller-manager.yaml"
+[controlplane] Wrote Static Pod manifest for component kube-scheduler to "/etc/kubernetes/manifests/kube-scheduler.yaml"
+[etcd] Wrote Static Pod manifest for a local etcd instance to "/etc/kubernetes/manifests/etcd.yaml"
+[init] Waiting for the kubelet to boot up the control plane as Static Pods from directory "/etc/kubernetes/manifests".
+[init] This might take a minute or longer if the control plane images have to be pulled.
+[apiclient] All control plane components are healthy after 29.501843 seconds
+[uploadconfig]?Storing the configuration used in ConfigMap "kubeadm-config" in the "kube-system" Namespace
+[markmaster] Will mark node master as master by adding a label and a taint
+[markmaster] Master master tainted and labelled with key/value: node-role.kubernetes.io/master=""
+[bootstraptoken] Using token: 519b54.88eed49bf0694e65
+[bootstraptoken] Configured RBAC rules to allow Node Bootstrap tokens to post CSRs in order for nodes to get long term certificate credentials
+[bootstraptoken] Configured RBAC rules to allow the csrapprover controller automatically approve CSRs from a Node Bootstrap Token
+[bootstraptoken] Configured RBAC rules to allow certificate rotation for all node client certificates in the cluster
+[bootstraptoken] Creating the "cluster-info" ConfigMap in the "kube-public" namespace
+[addons] Applied essential addon: kube-dns
+[addons] Applied essential addon: kube-proxy
+
+Your Kubernetes master has initialized successfully!
+
+To start using your cluster, you need to run the following as a regular user:
+
+  mkdir -p $HOME/.kube
+  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+You should now deploy a pod network to the cluster.
+Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+  https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+You can now join any number of machines by running the following on each node
+as root:
+
+  kubeadm join --token 519b54.88eed49bf0694e65 192.168.137.100:6443 --discovery-token-ca-cert-hash sha256:bd237d5fb5183b3b0c169025ef95ef8a3101b8d6ae0b039776acaadeace0fa90
+
+
+默认token 24小时就会过期，如果后续的机器要加入集群需要重新生成token
+#kubeadm token create 
+
+然后在执行
+#kubeadm join --token xxx master_ip:6443
+
+
+按照上面提示，此时root用户还不能使用kubelet控制集群需要，配置下环境变量
+对于非root用户
+#mkdir -p $HOME/.kube
+#cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+#chown $(id -u):$(id -g) $HOME/.kube/config
+
+对于root用户
+#export KUBECONFIG=/etc/kubernetes/admin.conf
+
+也可以直接放到~/.bash_profile
+#echo "export KUBECONFIG=/etc/kubernetes/admin.conf" >> ~/.bash_profile
+#source ~/.bash_profile
+
+安装网络，可以使用flannel、calico、weave、macvlan这里我们用flannel。
+wget https://raw.githubusercontent.com/coreos/flannel/v0.9.1/Documentation/kube-flannel.yml
+或直接使用离线包里面的
+若要修改网段，需要kubeadm –pod-network-cidr=和这里同步
+vim kube-flannel.yml
+修改network项
+"Network": "10.244.0.0/16", 
+
+执行命令
+#kubectl create  -f kube-flannel.yml
+
+
+Node节点加入集群
+slave1节点加入集群：
+#kubeadm join --token 519b54.88eed49bf0694e65 192.168.137.100:6443 --discovery-token-ca-cert-hash sha256:bd237d5fb5183b3b0c169025ef95ef8a3101b8d6ae0b039776acaadeace0fa90
+
+
+slave2节点加入集群
+#kubeadm join --token 519b54.88eed49bf0694e65 192.168.137.100:6443 --discovery-token-ca-cert-hash sha256:bd237d5fb5183b3b0c169025ef95ef8a3101b8d6ae0b039776acaadeace0fa90
+
+
+master节点执行命令查看集群节点信息
+
+
+kubernetes会在每个node节点创建flannel和kube-proxy的pod
+
+
+
+部署kubernetes-dashboard
+#kubectl create -f kubernetes-dashboard.yaml
+
+
+四、修改anonymous用户的访问权限
+官方wiki找到，直接赋予admin privileges的yaml。
+#cat > kubernetes-dashboard.yaml << EOF
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: kubernetes-dashboard
+  labels:
+    k8s-app: kubernetes-dashboard
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: kubernetes-dashboard
+  namespace: kube-system
+EOF
+
+#kubectl apply -f dashboard-admin.yaml
+
+
+访问地址https://192.168.137.100:32666
+
